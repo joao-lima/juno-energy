@@ -37,6 +37,7 @@ Source: https://github.com/ARM-software/devlib/tree/master/src/readenergy
 #include <time.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <inttypes.h>
 
 // The following values obtained from Juno TRM 2014/03/04 section 4.5
 
