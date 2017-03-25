@@ -93,6 +93,9 @@ Source: https://github.com/ARM-software/devlib/tree/master/src/readenergy
 // Default counter poll period (in milliseconds).
 #define DEFAULT_PERIOD 100
 
+// Default duration for the instrument execution (in seconds); 0 means 'forever'
+#define DEFAULT_DURATION 0
+
 // A single reading from the energy meter. The values are the proper readings converted
 // to appropriate units (e.g. Watts for power); they are *not* raw counter values.
 struct reading
@@ -115,7 +118,7 @@ struct reading
 	double sys_enm_ch0_gpu;
 };
 
-static inline uint64_t join_64bit_register(uint32_t *buffer, int index)
+inline uint64_t join_64bit_register(uint32_t *buffer, int index)
 {
 	uint64_t result = 0;
 	result |= buffer[index];
@@ -147,11 +150,15 @@ void print_help()
 {
 	fprintf(stderr, "Usage: readenergy [-t PERIOD] [-o OUTFILE]\n\n"
 			"Read Juno energy counters every PERIOD milliseconds, writing them\n"
-			"to OUTFILE in CSV format until SIGTERM is received.\n"
+			"to OUTFILE in CSV format either until SIGTERM is received OR\n"
+			"till the specified duration elapsed.\n"
 			"If OUTFILE is not specified, stdout will be used.\n\n"
 			"Parameters:\n"
 			"	PERIOD is the counter poll period in milliseconds.\n"
 			"	       (Defaults to 100 milliseconds.)\n"
+			"	DURATION is the duration before execution terminates.\n"
+			"		(Defaults to 0 seconds, meaning run till user\n"
+			"		terminates execution.\n"
 			"	OUTFILE is the output file path\n");
 }
 
@@ -168,6 +175,7 @@ struct config
 {
 	struct timespec period;
 	char *output_file;
+	long duration_in_sec;
 };
 
 void config_init_period_from_millis(struct config *this, long millis)
@@ -180,9 +188,10 @@ void config_init(struct config *this, int argc, char *argv[])
 {
 	this->output_file = NULL;
 	config_init_period_from_millis(this, DEFAULT_PERIOD);
+	this->duration_in_sec = DEFAULT_DURATION;
 
 	int opt;
-	while ((opt = getopt(argc, argv, "ht:o:")) != -1)
+	while ((opt = getopt(argc, argv, "ht:o:d:")) != -1)
 	{
 		switch(opt)
 		{
@@ -191,6 +200,9 @@ void config_init(struct config *this, int argc, char *argv[])
 				break;
 			case 'o':
 				this->output_file = optarg;
+				break;
+			case 'd':
+				this->duration_in_sec = atol(optarg);
 				break;
 			case 'h':
 				print_help();
@@ -318,12 +330,18 @@ void emeter_finalize(struct emeter *this)
 
 // -------------------------------------- /emeter ----------------------------------------------------
 
-int done = 0;
+volatile int done = 0;
 
 void term_handler(int signum)
 {
 	done = 1;
 }
+
+void sigalrm_handler(int signum)
+{
+	done = 1;
+}
+
 
 int main(int argc, char *argv[])
 {
@@ -336,6 +354,17 @@ int main(int argc, char *argv[])
 	struct emeter emeter;
 	config_init(&config, argc, argv);
 	emeter_init(&emeter, config.output_file);
+
+	if (0 != config.duration_in_sec)
+	{
+		/*Set the alarm with the duration from use only if a non-zero value is specified
+		  else it will run forever until SIGTERM signal received from user*/
+		/*Set the signal handler first*/
+		signal(SIGALRM, sigalrm_handler);
+		/*Now set the alarm for the duration specified by the user*/
+		alarm(config.duration_in_sec);
+
+	}
 
 	if(config.output_file)
 	{
