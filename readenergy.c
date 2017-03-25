@@ -35,6 +35,7 @@ Source: https://github.com/ARM-software/devlib/tree/master/src/readenergy
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 // The following values obtained from Juno TRM 2014/03/04 section 4.5
@@ -162,6 +163,29 @@ void print_help()
 			"	OUTFILE is the output file path\n");
 }
 
+#if 1
+typedef struct timespec struct_time;
+#  define gettime(t) clock_gettime( CLOCK_REALTIME, t)
+#  define get_sub_seconde(t) (1e-9*(double)t.tv_nsec)
+#  define get_sub_seconde_ns(t) ((uint64_t)t.tv_nsec)
+#else
+typedef struct timeval struct_time;
+#  define gettime(t) gettimeofday( t, 0)
+#  define get_sub_seconde(t) (1e-6*(double)t.tv_usec)
+#  define get_sub_seconde_ns(t) (1000*(uint64_t)t.tv_usec)
+#endif
+
+uint64_t kaapi_get_elapsedns(void)
+{
+  uint64_t retval;
+  struct_time st;
+  int err = gettime(&st);
+  if (err != 0) return (uint64_t)0UL;
+  retval = (uint64_t)st.tv_sec * 1000000000ULL;
+  retval += get_sub_seconde_ns(st);
+  return retval;
+}
+
 // debugging only...
 inline void dprint(char *msg)
 {
@@ -258,7 +282,7 @@ void emeter_init(struct emeter *this, char *outfile)
 	}
 
 	if(this->out) {
-		fprintf(this->out, "sys_curr,a57_curr,a53_curr,gpu_curr,"
+		fprintf(this->out, "time,sys_curr,a57_curr,a53_curr,gpu_curr,"
 				   "sys_volt,a57_volt,a53_volt,gpu_volt,"
 				   "sys_pow,a57_pow,a53_pow,gpu_pow,"
 				   "sys_cenr,a57_cenr,a53_cenr,gpu_cenr\n");
@@ -290,8 +314,10 @@ void emeter_take_reading(struct emeter *this)
 {
 	static struct reading reading;
 	int error_count = 0;
+    uint64_t timestamp = kaapi_get_elapsedns();
 	emeter_read_measurements(this, &reading);
-	int ret = fprintf(this->out, "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n",
+	int ret = fprintf(this->out, "%" PRIu64 ",%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n",
+            timestamp,
 			reading.sys_adc_ch0_pm1_sys,
 			reading.sys_adc_ch1_pm2_a57,
 			reading.sys_adc_ch2_pm3_a53,
